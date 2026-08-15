@@ -331,6 +331,18 @@ if 'video_id' in st.session_state:
         emo_accent = "#6bff9e" if is_curious else "#dddddd"
         emo_icon = "✨" if is_curious else "🎭"
 
+        # Consensus badge — how much face/voice/text agreed on the dominant emotion
+        cons = metrics._consensus_level(row.get("consensus_ratio"))
+        if cons:
+            cons_icon, cons_label, cons_color = cons
+            consensus_html = (
+                f"<span title='{cons_label} — average agreement across face, voice and text signals' "
+                f"style='color:{cons_color};font-size:0.9rem;margin-left:12px;'>"
+                f"{cons_icon} {cons_label}</span>"
+            )
+        else:
+            consensus_html = ""
+
         # Distraction color
         distr = row["distracted_pct"]
         distr_color = "#f87171" if distr > 30 else "#fbbf24" if distr > 15 else "#dddddd"
@@ -346,6 +358,7 @@ if 'video_id' in st.session_state:
             f"</div>"
             f"<div style='background:{emo_bg};border-left:4px solid {emo_accent};padding:10px 14px;border-radius:6px;margin-top:16px;'>"
             f"<span style='color:{emo_accent};font-weight:600;'>{emo_icon} Mostly {dom}</span>"
+            f"{consensus_html}"
             f"</div>"
             f"</div>"
         )
