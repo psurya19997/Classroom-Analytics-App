@@ -248,11 +248,14 @@ if 'video_id' in st.session_state:
                     if clean:
                         db.update_video_title(vid, clean)
                         st.session_state[edit_key] = False
+                        # Clear the input's widget state so next open re-reads fresh from DB
+                        st.session_state.pop(f"input_{vid}", None)
                         st.rerun()
                     else:
                         st.warning("Title can't be empty.")
                 if bc2.button("Cancel", key=f"cancel_{vid}", use_container_width=True):
                     st.session_state[edit_key] = False
+                    st.session_state.pop(f"input_{vid}", None)
                     st.rerun()
         else:
             # Normal view: banner + tiny edit button
@@ -316,7 +319,7 @@ if 'video_id' in st.session_state:
             "Select a student",
             options=names,
             index=0,
-            help="Sorted by attendance %. First student is shown by default.",
+            help="Sorted by on-camera %. First student is shown by default.",
         )
         row = child_df[child_df["name"] == selected].iloc[0]
 
@@ -332,7 +335,7 @@ if 'video_id' in st.session_state:
         emo_icon = "✨" if is_curious else "🎭"
 
         # Consensus badge — how much face/voice/text agreed on the dominant emotion
-        cons = metrics._consensus_level(row.get("consensus_ratio"))
+        cons = metrics.consensus_level(row.get("consensus_ratio"))
         if cons:
             cons_icon, cons_label, cons_color = cons
             consensus_html = (
@@ -354,7 +357,7 @@ if 'video_id' in st.session_state:
             f"<div style='font-size:1.5rem;font-weight:700;color:#fff;'>👤 {row['name']}</div>"
             f"<div style='color:#8b949e;font-size:0.9rem;font-style:italic;margin-top:2px;'>{row['appearance']}</div>"
             f"</div>"
-            f"<div style='background:{att_color};color:#0a0a0a;padding:8px 16px;border-radius:20px;font-weight:700;font-size:1.1rem;'>{att}% attendance</div>"
+            f"<div style='background:{att_color};color:#0a0a0a;padding:8px 16px;border-radius:20px;font-weight:700;font-size:1.1rem;' title='Percent of analyzed frames where this child was visible on camera. Camera-off attendees are not counted.'>{att}% on-camera</div>"
             f"</div>"
             f"<div style='background:{emo_bg};border-left:4px solid {emo_accent};padding:10px 14px;border-radius:6px;margin-top:16px;'>"
             f"<span style='color:{emo_accent};font-weight:600;'>{emo_icon} Mostly {dom}</span>"

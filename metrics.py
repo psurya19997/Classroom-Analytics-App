@@ -253,7 +253,7 @@ def _triangulate_per_bucket(video_id):
     ]]
 
 
-def _consensus_level(agreement_ratio):
+def consensus_level(agreement_ratio):
     """Map avg agreement ratio in [0,1] to a badge. 1.0 = all modalities agreed."""
     if agreement_ratio is None:
         return None
@@ -386,20 +386,9 @@ def get_engagement_heatmap(video_id):
         flags = ""
         if r.get("hand_raised"): flags += "✋ hand raised · "
         if r.get("distracted"):  flags += "👁 distracted"
-        agree = int(r.get("agreement_count") or 0)
-        present = int(r.get("modalities_present") or 0)
-        if present == 0:
-            consensus = ""
-        elif agree == present and present >= 2:
-            consensus = f"🟢 all {present} sources agreed<br>"
-        elif agree >= 2:
-            consensus = f"🟡 {agree} of {present} sources agreed<br>"
-        else:
-            consensus = f"🔴 sources disagreed ({present} available)<br>"
         return (
             f"<b>{r['name']}</b> @ {r['time_label']}<br>"
             f"<b>{r['best_emotion']}</b><br>"
-            f"{consensus}"
             f"{face_ctx}"
             f"{flags}"
         )
