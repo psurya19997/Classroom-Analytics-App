@@ -220,7 +220,7 @@ if 'video_id' in st.session_state:
     if st.session_state.get('is_demo'):
         st.info("👋 You're viewing a **sample analysis** so you can explore the dashboard instantly. Paste a video URL in the sidebar to run your own.")
 
-    # --- Video header banner ---
+    # --- Video header banner (with inline rename) ---
     header = metrics.get_video_header(vid)
     if header:
         h_title = header.get("video_title") or "(untitled recording)"
@@ -229,15 +229,49 @@ if 'video_id' in st.session_state:
         h_frames = header.get("frames_analyzed") or 0
         dur_str = _fmt_duration(h_dur)
         link_html = f"<a href='{h_url}' target='_blank' style='color:#4da6ff;text-decoration:none;'>🔗 open source</a>" if h_url else ""
-        header_html = (
-            f"<div style='background:#1a2332;border-left:4px solid #4da6ff;padding:14px 18px;border-radius:6px;margin:12px 0 20px 0;'>"
-            f"<div style='font-size:1.1rem;font-weight:600;color:#fff;'>🎬 {h_title}</div>"
-            f"<div style='color:#aaa;font-size:0.9rem;margin-top:6px;'>"
-            f"⏱ {dur_str} &nbsp;·&nbsp; 🖼 {h_frames} frames analyzed &nbsp;·&nbsp; {link_html}"
-            f"</div>"
-            f"</div>"
-        )
-        st.markdown(header_html, unsafe_allow_html=True)
+
+        edit_key = f"edit_title_{vid}"
+        if st.session_state.get(edit_key, False):
+            # Edit mode
+            with st.container(border=True):
+                st.markdown("**✏️ Rename this video**")
+                new_title = st.text_input(
+                    "New title",
+                    value=h_title,
+                    key=f"input_{vid}",
+                    max_chars=100,
+                    label_visibility="collapsed",
+                )
+                bc1, bc2, _ = st.columns([1, 1, 6])
+                if bc1.button("💾 Save", key=f"save_{vid}", type="primary", use_container_width=True):
+                    clean = (new_title or "").strip()[:100]
+                    if clean:
+                        db.update_video_title(vid, clean)
+                        st.session_state[edit_key] = False
+                        st.rerun()
+                    else:
+                        st.warning("Title can't be empty.")
+                if bc2.button("Cancel", key=f"cancel_{vid}", use_container_width=True):
+                    st.session_state[edit_key] = False
+                    st.rerun()
+        else:
+            # Normal view: banner + tiny edit button
+            hcol, ecol = st.columns([12, 1])
+            with hcol:
+                header_html = (
+                    f"<div style='background:#1a2332;border-left:4px solid #4da6ff;padding:14px 18px;border-radius:6px;margin:12px 0 20px 0;'>"
+                    f"<div style='font-size:1.1rem;font-weight:600;color:#fff;'>🎬 {h_title}</div>"
+                    f"<div style='color:#aaa;font-size:0.9rem;margin-top:6px;'>"
+                    f"⏱ {dur_str} &nbsp;·&nbsp; 🖼 {h_frames} frames analyzed &nbsp;·&nbsp; {link_html}"
+                    f"</div>"
+                    f"</div>"
+                )
+                st.markdown(header_html, unsafe_allow_html=True)
+            with ecol:
+                st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+                if st.button("✏️", key=f"edit_{vid}", help="Rename this video"):
+                    st.session_state[edit_key] = True
+                    st.rerun()
 
     st.markdown("---")
 

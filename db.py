@@ -110,6 +110,14 @@ def get_connection(video_id):
     return sqlite3.connect(get_db_path(video_id))
 
 
+def update_video_title(video_id, new_title):
+    """Set video_metadata.video_title on the given video's DB."""
+    conn = sqlite3.connect(get_db_path(video_id))
+    conn.execute("UPDATE video_metadata SET video_title = ?", (new_title,))
+    conn.commit()
+    conn.close()
+
+
 def list_analyses():
     """Walk cache/ and return one row per analyzed video, newest first."""
     rows = []
