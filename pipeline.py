@@ -24,9 +24,27 @@ class ScriptRow(BaseModel):
     speaker_name: str | None = Field(description="If known from context/vision. Nullable.")
     utterance: str
     is_question: bool
-    emotion_audio: str = Field(description="e.g. Attentive, Joyful, Bored, Frustrated, Neutral")
+    emotion_audio: str = Field(description=(
+        "Emotion based ONLY on voice tone/prosody — IGNORE the words. Pick exactly one of: "
+        "Attentive (active listening backchannels, engaged pauses); "
+        "Curious (upward inflection, question-like tone); "
+        "Joyful (bright, energetic delivery, laughter); "
+        "Neutral (flat, unremarkable delivery); "
+        "Confused (hesitant, unfinished phrases, uptalk); "
+        "Bored (monotone, low energy, slow pace); "
+        "Frustrated (tense, sharp, loud, terse)."
+    ))
     confidence_audio: float = Field(description="0.0 to 1.0")
-    emotion_text: str = Field(description="e.g. Attentive, Joyful, Bored, Frustrated, Neutral")
+    emotion_text: str = Field(description=(
+        "Emotion based ONLY on the words spoken — IGNORE the tone. Pick exactly one of: "
+        "Attentive (on-topic response, engages with the lesson content); "
+        "Curious (contains a question, 'why', 'how', 'what if'); "
+        "Joyful (positive words, exclamations of enjoyment); "
+        "Neutral (factual, matter-of-fact statement); "
+        "Confused ('I don't get it', 'wait', 'huh', 'sorry?'); "
+        "Bored (short disengaged replies, off-topic muttering); "
+        "Frustrated (negative words, complaints, 'this is stupid')."
+    ))
     confidence_text: float = Field(description="0.0 to 1.0")
     keywords: list[str]
     teacher_behavior_flag: str = Field(description="'Shouting', 'Praising', 'Demotivating', or 'None'")
@@ -39,7 +57,16 @@ class ChildEmotionRow(BaseModel):
     name: str = Field(description="Display name read from video feed, or 'Kid_X'")
     role: str = Field(description="'student' or 'teacher'")
     appearance: str = Field(description="Visual description for disambiguation")
-    emotion_visual: str = Field(description="e.g. Attentive, Joyful, Bored, Frustrated, Neutral")
+    emotion_visual: str = Field(description=(
+        "Emotion based ONLY on face and posture — IGNORE audio if any. Pick exactly one of: "
+        "Attentive (gaze on screen/notes, upright or forward posture); "
+        "Curious (leaning in, brow raise, head tilt with focus); "
+        "Joyful (smiling, laughing, animated expression); "
+        "Neutral (blank but present, no strong signal); "
+        "Confused (furrowed brow, mouth agape, tilted head without focus); "
+        "Bored (slouched, drooping eyes, head resting on hand); "
+        "Frustrated (jaw tension, tight mouth, glaring)."
+    ))
     confidence_visual: float
     facial_expression: str
     posture: str
@@ -168,6 +195,8 @@ def run_pipeline(url, api_key, progress_callback=None):
     These are sequentially extracted frames from a classroom video (1 frame every {bucket_sec} seconds).
     You MUST analyze attendance and list the emotions of EVERY child visible, even if they are in tiny thumbnail boxes on the edge of the screen!
     For each child you spot, list their facial expressions and posture.
+    Judge each child's `emotion_visual` STRICTLY from face and posture — do not infer from any audio context.
+    Use the exact 7-emotion vocabulary defined in the schema.
     Read their display names if visible, otherwise describe them (e.g. 'Kid with red shirt').
     Do NOT return an empty frames array. You must provide a log for every single frame provided!
     """
@@ -196,9 +225,11 @@ def run_pipeline(url, api_key, progress_callback=None):
     audio_file = client.files.upload(file=audio_path)
     audio_prompt = f"""
     Transcribe and diarize this classroom audio. You MUST return a script array, even if it's just one person talking.
-    For each utterance, extract the emotional state strictly based on tone of voice (emotion_audio), 
-    and the emotional state strictly based on the words said (emotion_text). 
-    Provide confidence scores (0.0 to 1.0) for both.
+    For each utterance, extract two INDEPENDENT emotional judgments:
+    - `emotion_audio`: judged ONLY from voice tone/prosody — do NOT let the words influence you.
+    - `emotion_text`: judged ONLY from the words said — do NOT let the tone influence you.
+    They should sometimes disagree on the same utterance; that's expected and desirable.
+    Provide confidence scores (0.0 to 1.0) for both. Use the exact 7-emotion vocabulary defined in the schema.
     Flag teacher behaviors (Shouting, Praising, Demotivating, or None). If unsure, use 'None'.
     If a child's name isn't spoken, leave it null. Do not return an empty array if speech exists!
     {roster_block}

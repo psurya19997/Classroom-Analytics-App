@@ -326,7 +326,7 @@ if 'video_id' in st.session_state:
 
         # Highlight if dominant emotion is Curious/positive
         dom = row["dominant_emotion"]
-        is_curious = str(dom).strip().capitalize() in ("Curious", "Attentive", "Joyful", "Engaged", "Interested")
+        is_curious = str(dom).strip().capitalize() in ("Curious", "Attentive", "Joyful")
         emo_bg = "#0a3a1a" if is_curious else "#2a2a2a"
         emo_accent = "#6bff9e" if is_curious else "#dddddd"
         emo_icon = "✨" if is_curious else "🎭"
