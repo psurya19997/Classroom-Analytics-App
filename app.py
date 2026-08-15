@@ -12,7 +12,7 @@ load_dotenv()
 
 st.set_page_config(page_title="Classroom Insight", page_icon="🎓", layout="wide")
 
-st.title("🎓 Classroom Insight — See What Your Class Really Feels")
+st.markdown("<h1 style='font-size: 2.6rem; margin-top: -20px;'>🎓 Classroom Insight — See What Your Class Really Feels</h1>", unsafe_allow_html=True)
 PAPER_URL = "https://github.com/psurya19997/Classroom-Analytics-App/blob/main/docs/paper.pdf"
 
 st.markdown(
