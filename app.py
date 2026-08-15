@@ -6,6 +6,7 @@ import os
 
 from pipeline import run_pipeline, get_video_id
 import metrics
+import db
 
 load_dotenv()
 
@@ -16,30 +17,98 @@ st.markdown("Analyze online classroom engagement, attendance, and emotion via **
 
 # Sidebar for API Key and URL
 st.sidebar.header("Configuration")
-api_key = st.sidebar.text_input("Gemini API Key", value=os.environ.get("GEMINI_API_KEY", ""), type="password")
+user_api_key = st.sidebar.text_input(
+    "Gemini API Key (optional)",
+    value="",
+    type="password",
+    placeholder="Leave blank to use server key",
+    help="Overrides the server-side key for this run only. Never stored.",
+)
 video_url = st.sidebar.text_input("Video URL (YouTube or Google Drive)")
 analyze_button = st.sidebar.button("Analyze Video")
 
+
+def _fmt_duration(sec):
+    if not sec or sec <= 0:
+        return "—"
+    m, s = divmod(int(sec), 60)
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _fmt_ts(iso):
+    if not iso:
+        return "—"
+    return iso.replace("T", " ")[:16]
+
+
+with st.sidebar.expander(f"📜 History and Examples", expanded=True):
+    history = db.list_analyses()
+    if not history:
+        st.caption("No videos analyzed yet.")
+    else:
+        st.caption(f"{len(history)} video(s) in cache")
+        for row in history:
+            name = row["video_title"] or "(untitled)"
+            url = row["original_url"] or ""
+            with st.container(border=True):
+                st.markdown(f"**{name}**")
+                if url:
+                    st.markdown(f"[🔗 open link]({url})")
+                cols = st.columns(2)
+                cols[0].caption(f"🕐 {_fmt_ts(row['processed_date'])}")
+                cols[1].caption(f"⏱ {_fmt_duration(row['total_duration_sec'])}")
+                if st.button("Load", key=f"load_{row['video_id']}", use_container_width=True):
+                    st.session_state['video_id'] = row['video_id']
+                    st.rerun()
+
+
+def _resolve_api_key(user_key: str):
+    """Priority: UI-supplied key > .env key. Returns (key, source)."""
+    if user_key and user_key.strip():
+        return user_key.strip(), "user"
+    env_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if env_key:
+        return env_key, "env"
+    return None, None
+
+
+def _is_auth_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    return any(tok in msg for tok in (
+        "api key not valid", "api_key_invalid", "invalid api key",
+        "permission_denied", "unauthenticated", "401", "403",
+    ))
+
+
 if analyze_button:
+    api_key, key_source = _resolve_api_key(user_api_key)
+
     if not api_key:
-        st.sidebar.error("Please provide a Gemini API Key.")
+        st.sidebar.error("No API key available. Enter one in the sidebar or set GEMINI_API_KEY in the server's .env file.")
     elif not video_url:
         st.sidebar.error("Please provide a Video URL.")
     else:
         with st.spinner("Processing Multimodal Data (This may take a few minutes)..."):
             progress_bar = st.progress(0)
             status_text = st.empty()
-            
+
             def update_progress(msg, pct):
                 status_text.text(msg)
                 progress_bar.progress(pct)
-                
+
             try:
                 result = run_pipeline(video_url, api_key, progress_callback=update_progress)
                 st.session_state['video_id'] = result['video_id']
                 st.success(f"Processing Complete! Status: {result['status']}")
             except Exception as e:
-                st.error(f"Pipeline Error: {str(e)}")
+                if _is_auth_error(e):
+                    if key_source == "user":
+                        st.error(f"The API key you entered was rejected by Gemini. Please check it and try again.\n\nDetails: {e}")
+                    else:
+                        st.error(f"The server's configured Gemini API key is invalid or missing permissions. Contact the administrator, or enter your own key in the sidebar to unblock.\n\nDetails: {e}")
+                else:
+                    st.error(f"Pipeline Error ({key_source} key): {e}")
 
 # Dashboard Rendering
 if 'video_id' in st.session_state:

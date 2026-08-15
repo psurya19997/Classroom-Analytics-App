@@ -65,8 +65,10 @@ def get_duration(file_path):
 
 def download_video(url, video_id):
     video_path = os.path.join(TMP_DIR, f"{video_id}.mp4")
+    title = None
+
     if os.path.exists(video_path):
-        return video_path
+        return video_path, title
 
     if "youtube.com" in url or "youtu.be" in url:
         from yt_dlp import YoutubeDL
@@ -76,14 +78,26 @@ def download_video(url, video_id):
             'quiet': True
         }
         with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            info = ydl.extract_info(url, download=True)
+            title = info.get('title') if info else None
     elif "drive.google.com" in url:
         import gdown
-        gdown.download(url, video_path, quiet=False, fuzzy=True)
+        import re
+        # Accept /file/d/<ID>/..., open?id=<ID>, or uc?id=<ID>
+        m = re.search(r'/file/d/([^/]+)', url) or re.search(r'[?&]id=([^&]+)', url)
+        if m:
+            direct_url = f"https://drive.google.com/uc?id={m.group(1)}"
+        else:
+            direct_url = url
+        try:
+            gdown.download(direct_url, video_path, quiet=False, fuzzy=True)
+        except TypeError:
+            # Older gdown (<4.4) has no fuzzy kwarg
+            gdown.download(direct_url, video_path, quiet=False)
     else:
         raise ValueError("Unsupported URL format")
-    
-    return video_path
+
+    return video_path, title
 
 def extract_audio(video_path, video_id):
     wav_path = os.path.join(TMP_DIR, f"{video_id}_16k.wav")
@@ -123,7 +137,7 @@ def run_pipeline(url, api_key, progress_callback=None):
         return {"status": "cached", "video_id": video_id}
 
     if progress_callback: progress_callback("Downloading video...", 10)
-    video_path = download_video(url, video_id)
+    video_path, video_title = download_video(url, video_id)
     duration_sec = get_duration(video_path)
     file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
     
@@ -136,48 +150,65 @@ def run_pipeline(url, api_key, progress_callback=None):
     c = conn.cursor()
     
     c.execute('''
-        INSERT INTO video_metadata (url_hash, original_url, processed_date, total_duration_sec, file_size_mb)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (video_id, url, datetime.now().isoformat(), duration_sec, file_size_mb))
+        INSERT INTO video_metadata (url_hash, original_url, video_title, processed_date, total_duration_sec, file_size_mb)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (video_id, url, video_title, datetime.now().isoformat(), duration_sec, file_size_mb))
     metadata_id = c.lastrowid
     
     client = genai.Client(api_key=api_key)
-    
-    # 1. Audio Processing
-    if progress_callback: progress_callback("Running Gemini Audio/Text Analysis...", 50)
-    audio_file = client.files.upload(file=audio_path)
-    audio_prompt = """
-    Transcribe and diarize this classroom audio.
-    For each utterance, extract the emotional state strictly based on tone of voice (emotion_audio), 
-    and the emotional state strictly based on the words said (emotion_text). 
-    Provide confidence scores (0.0 to 1.0) for both.
-    Flag teacher behaviors (Shouting, Praising, Demotivating, or None).
-    """
-    audio_resp = client.models.generate_content(
-        model='gemini-1.5-flash',
-        contents=[audio_file, audio_prompt],
-        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=AudioResponse)
-    )
-    script_data = json.loads(audio_resp.text)
-    
-    # 2. Vision Processing
-    if progress_callback: progress_callback("Running Gemini Vision Analysis on Frames...", 70)
+
+    # 1. Vision Processing (run FIRST so we can inject known names into the audio prompt)
+    if progress_callback: progress_callback("Running Gemini Vision Analysis on Frames...", 50)
     frame_files = sorted(glob.glob(os.path.join(frames_dir, "*.jpg")))
     uploaded_frames = []
     for f in frame_files:
         uploaded_frames.append(client.files.upload(file=f))
-        
+
     vision_prompt = f"""
     These are sequentially extracted frames from a classroom video (1 frame every {bucket_sec} seconds).
-    Analyze attendance and list the emotions of every child visible via their facial expressions and posture.
-    Read their display names if visible, otherwise describe them.
+    You MUST analyze attendance and list the emotions of EVERY child visible, even if they are in tiny thumbnail boxes on the edge of the screen!
+    For each child you spot, list their facial expressions and posture.
+    Read their display names if visible, otherwise describe them (e.g. 'Kid with red shirt').
+    Do NOT return an empty frames array. You must provide a log for every single frame provided!
     """
     vision_resp = client.models.generate_content(
-        model='gemini-1.5-flash',
+        model='gemini-flash-latest',
         contents=uploaded_frames + [vision_prompt],
         config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=VisionResponse)
     )
     vision_data = json.loads(vision_resp.text)
+
+    # Build participant hint from vision output for the audio call
+    seen_names = {}  # name -> role
+    for f_log in vision_data.get("frames", []):
+        for child in f_log.get("child_emotions", []):
+            nm = child.get("name")
+            if nm and nm not in seen_names:
+                seen_names[nm] = child.get("role", "student")
+    if seen_names:
+        participant_hint = "\n".join(f"- {n} ({r})" for n, r in seen_names.items())
+        roster_block = f"\nKnown participants visible in this class:\n{participant_hint}\n\nWhen attributing an utterance, set `speaker_name` and `targeted_child_name` to one of the names above ONLY if the audio makes it reasonably clear (e.g., someone addresses them by name, or an earlier line established the speaker). Otherwise leave them null."
+    else:
+        roster_block = ""
+
+    # 2. Audio Processing
+    if progress_callback: progress_callback("Running Gemini Audio/Text Analysis...", 70)
+    audio_file = client.files.upload(file=audio_path)
+    audio_prompt = f"""
+    Transcribe and diarize this classroom audio. You MUST return a script array, even if it's just one person talking.
+    For each utterance, extract the emotional state strictly based on tone of voice (emotion_audio), 
+    and the emotional state strictly based on the words said (emotion_text). 
+    Provide confidence scores (0.0 to 1.0) for both.
+    Flag teacher behaviors (Shouting, Praising, Demotivating, or None). If unsure, use 'None'.
+    If a child's name isn't spoken, leave it null. Do not return an empty array if speech exists!
+    {roster_block}
+    """
+    audio_resp = client.models.generate_content(
+        model='gemini-flash-latest',
+        contents=[audio_file, audio_prompt],
+        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=AudioResponse)
+    )
+    script_data = json.loads(audio_resp.text)
     
     # 3. Database Insertion
     if progress_callback: progress_callback("Saving to SQLite Database...", 90)

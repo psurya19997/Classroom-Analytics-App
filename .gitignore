@@ -8,9 +8,7 @@ __pycache__/
 *.py[cod]
 
 # Caches & Temp files
-cache/
 tmp/
-*.db
 
 # Streamlit
 .streamlit/

@@ -78,19 +78,20 @@ def get_child_emotion_timeline(video_id):
     conn = db.get_connection(video_id)
     
     v_df = pd.read_sql_query('''
-        SELECT c.timestamp_sec as bucket, r.name as child_name, c.emotion_visual, c.confidence_visual 
+        SELECT c.timestamp_sec as bucket, r.name as child_name, c.emotion_visual, c.confidence_visual
         FROM child_frame_emotion c
         JOIN child_registry r ON c.child_id = r.child_id
+        WHERE r.role = 'student'
     ''', conn)
-    
+
     a_df = pd.read_sql_query('''
-        SELECT CAST(s.start_sec / ? AS INTEGER) * ? as bucket, 
-               r.name as child_name, 
-               s.emotion_audio, s.confidence_audio, 
+        SELECT CAST(s.start_sec / ? AS INTEGER) * ? as bucket,
+               r.name as child_name,
+               s.emotion_audio, s.confidence_audio,
                s.emotion_text, s.confidence_text
         FROM script_storage s
         JOIN child_registry r ON s.speaker_child_id = r.child_id
-        WHERE s.speaker_norm = 'Student'
+        WHERE s.speaker_norm = 'Student' AND r.role = 'student'
     ''', conn, params=(b_sec, b_sec))
     conn.close()
     
@@ -155,7 +156,9 @@ def get_raw_transcript(video_id):
         ORDER BY s.start_sec
     ''', conn)
     conn.close()
-    
+    if df.empty:
+        return pd.DataFrame(columns=['time_range', 'speaker_display', 'utterance', 'emotion_text', 'is_question'])
+        
     df['speaker_display'] = df.apply(lambda row: row['specific_name'] if pd.notna(row['specific_name']) else row['speaker_norm'], axis=1)
     df['time_range'] = df.apply(lambda row: f"{int(row['start_sec']//60)}:{int(row['start_sec']%60):02d} - {int(row['end_sec']//60)}:{int(row['end_sec']%60):02d}", axis=1)
     

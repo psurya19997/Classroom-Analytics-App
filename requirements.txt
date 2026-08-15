@@ -1,7 +1,7 @@
 streamlit
 pandas
 yt-dlp
-gdown
+gdown>=4.4.0
 google-genai
 plotly
 python-dotenv

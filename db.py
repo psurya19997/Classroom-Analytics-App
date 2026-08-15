@@ -108,3 +108,37 @@ def init_db(video_id):
 def get_connection(video_id):
     """Returns a connection to the video's database."""
     return sqlite3.connect(get_db_path(video_id))
+
+
+def list_analyses():
+    """Walk cache/ and return one row per analyzed video, newest first."""
+    rows = []
+    if not os.path.isdir(CACHE_DIR):
+        return rows
+    for fname in os.listdir(CACHE_DIR):
+        if not fname.endswith(".db"):
+            continue
+        video_id = fname[:-3]
+        db_path = os.path.join(CACHE_DIR, fname)
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT url_hash, original_url, video_title, processed_date, total_duration_sec
+                FROM video_metadata LIMIT 1
+            """)
+            r = cur.fetchone()
+            conn.close()
+            if r:
+                rows.append({
+                    "video_id": video_id,
+                    "url_hash": r[0],
+                    "original_url": r[1],
+                    "video_title": r[2],
+                    "processed_date": r[3],
+                    "total_duration_sec": r[4],
+                })
+        except sqlite3.Error:
+            continue
+    rows.sort(key=lambda x: x["processed_date"] or "", reverse=True)
+    return rows
