@@ -13,9 +13,14 @@ load_dotenv()
 st.set_page_config(page_title="Classroom Insight", page_icon="🎓", layout="wide")
 
 st.title("🎓 Classroom Insight — See What Your Class Really Feels")
+PAPER_URL = "https://github.com/psurya19997/Classroom-Analytics-App/blob/main/docs/paper.pdf"
+
 st.markdown(
-    "<p style='font-size: 1.1rem; color: #888; margin-top: -10px;'>"
-    "AI-powered engagement analysis from any Zoom or YouTube classroom recording."
+    "<p style='font-size: 1.1rem; color: #aaa; margin-top: -6px; line-height:1.55;'>"
+    "Turn any recorded online class into per-child engagement analytics — "
+    "attendance, curiosity, participation, and teacher-behavior signals, in one click. "
+    f"<a href='{PAPER_URL}' target='_blank' style='color:#4da6ff;text-decoration:none;white-space:nowrap;'>"
+    "📄 Read the pilot study →</a>"
     "</p>",
     unsafe_allow_html=True,
 )
@@ -32,20 +37,17 @@ with hero_left:
     )
 with hero_right:
     st.markdown("**Tech Stack**")
-    st.markdown(
-        """
-        <div style='line-height:2.2'>
-            <span style='background:#1f77b4;color:white;padding:4px 10px;border-radius:12px;margin-right:6px;font-size:0.85rem'>Python</span>
-            <span style='background:#ff7f0e;color:white;padding:4px 10px;border-radius:12px;margin-right:6px;font-size:0.85rem'>Streamlit</span>
-            <span style='background:#2ca02c;color:white;padding:4px 10px;border-radius:12px;margin-right:6px;font-size:0.85rem'>Gemini 1.5 Flash</span>
-            <span style='background:#d62728;color:white;padding:4px 10px;border-radius:12px;margin-right:6px;font-size:0.85rem'>SQLite</span>
-            <span style='background:#9467bd;color:white;padding:4px 10px;border-radius:12px;margin-right:6px;font-size:0.85rem'>FFmpeg</span>
-            <span style='background:#8c564b;color:white;padding:4px 10px;border-radius:12px;margin-right:6px;font-size:0.85rem'>Pydantic</span>
-            <span style='background:#17becf;color:white;padding:4px 10px;border-radius:12px;margin-right:6px;font-size:0.85rem'>Plotly</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    _badge = "background:{c};color:white;padding:5px 12px;border-radius:14px;font-size:0.85rem;white-space:nowrap;font-weight:500;"
+    _tech = [
+        ("Python", "#1f77b4"), ("Streamlit", "#ff7f0e"), ("Gemini 1.5 Flash", "#2ca02c"),
+        ("SQLite", "#d62728"), ("FFmpeg", "#9467bd"), ("Plotly", "#17becf"),
+    ]
+    stack_html = (
+        "<div style='display:flex;flex-wrap:wrap;gap:8px;'>"
+        + "".join(f"<span style='{_badge.format(c=c)}'>{name}</span>" for name, c in _tech)
+        + "</div>"
     )
+    st.markdown(stack_html, unsafe_allow_html=True)
 
 with st.expander("🛠 How it works (technical architecture)", expanded=False):
     st.markdown(
@@ -217,145 +219,175 @@ if 'video_id' in st.session_state:
     vid = st.session_state['video_id']
     if st.session_state.get('is_demo'):
         st.info("👋 You're viewing a **sample analysis** so you can explore the dashboard instantly. Paste a video URL in the sidebar to run your own.")
+
+    # --- Video header banner ---
+    header = metrics.get_video_header(vid)
+    if header:
+        h_title = header.get("video_title") or "(untitled recording)"
+        h_url = header.get("original_url") or ""
+        h_dur = header.get("total_duration_sec") or 0
+        h_frames = header.get("frames_analyzed") or 0
+        dur_str = _fmt_duration(h_dur)
+        link_html = f"<a href='{h_url}' target='_blank' style='color:#4da6ff;text-decoration:none;'>🔗 open source</a>" if h_url else ""
+        header_html = (
+            f"<div style='background:#1a2332;border-left:4px solid #4da6ff;padding:14px 18px;border-radius:6px;margin:12px 0 20px 0;'>"
+            f"<div style='font-size:1.1rem;font-weight:600;color:#fff;'>🎬 {h_title}</div>"
+            f"<div style='color:#aaa;font-size:0.9rem;margin-top:6px;'>"
+            f"⏱ {dur_str} &nbsp;·&nbsp; 🖼 {h_frames} frames analyzed &nbsp;·&nbsp; {link_html}"
+            f"</div>"
+            f"</div>"
+        )
+        st.markdown(header_html, unsafe_allow_html=True)
+
     st.markdown("---")
-    
-    # 1. Baseline Metrics
-    st.subheader("Pedagogical Baseline Metrics")
+
+    # 1. Class at a Glance
+    st.subheader("📊 Class at a Glance")
     m = metrics.get_baseline_metrics(vid)
     col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Talk Rate", f"{m['student_talk_rate']} wpm", help="Student words per minute")
-    col2.metric("Dialogue Freq", f"{m['dialogue_frequency']} /min", help="Speaker switches per minute")
-    col3.metric("Student Agency", f"{m['student_agency']}", help="Student vs Teacher initiations")
-    col4.metric("Student Q Rate", f"{m['student_question_rate']} /min")
-    col5.metric("Teacher Q Rate", f"{m['teacher_question_rate']} /min")
+    col1.metric(
+        "Talk Rate", f"{m['student_talk_rate']} wpm",
+        help="**Student words per minute.**\n\nHow much students speak overall. Higher = more student voice in the room. Research benchmark: dialogic classrooms typically exceed 12 wpm."
+    )
+    col2.metric(
+        "Dialogue Freq", f"{m['dialogue_frequency']} /min",
+        help="**Speaker switches per minute.**\n\nCounts how often the conversation moves between teacher and students. Higher = more back-and-forth interactivity vs. a monologue."
+    )
+    col3.metric(
+        "Student Agency", f"{m['student_agency']}",
+        help="**Ratio of student-initiated turns to teacher-initiated turns** (after a 3-second gap).\n\nAbove 1.0 = students drove the conversation. Below 1.0 = teacher-led."
+    )
+    col4.metric(
+        "Student Q Rate", f"{m['student_question_rate']} /min",
+        help="**Student questions per minute.**\n\nA direct proxy for curiosity and inquiry-based engagement. High values = students are actively probing, not just receiving."
+    )
+    col5.metric(
+        "Teacher Q Rate", f"{m['teacher_question_rate']} /min",
+        help="**Teacher questions per minute.**\n\nMeasures how often the teacher invites student thinking (open questions) vs. lecturing."
+    )
     st.caption("💡 *Higher Talk Rate + Dialogue Frequency signals an active, dialogic classroom. Student Agency above 1.0 means students initiated more than the teacher.*")
     
     st.markdown("---")
     
-    # 2. Multimodal Emotion Analysis
-    st.subheader("Holistic Emotion Triangulation")
-    st.markdown("These emotions are mathematically triangulated from **Facial Expressions + Voice Tone + Semantic Words** using confidence weighting.")
-    
-    emo_df = metrics.get_child_emotion_timeline(vid)
-    
-    if not emo_df.empty:
-        colA, colB = st.columns([1, 2])
-        
-        with colA:
-            # Overall Pie Chart
-            pie_data = emo_df['holistic_emotion'].value_counts().reset_index()
-            pie_data.columns = ['Emotion', 'Count']
-            fig_pie = px.pie(pie_data, names='Emotion', values='Count', title="Overall Class Emotion", hole=0.4)
-            st.plotly_chart(fig_pie, use_container_width=True)
-            
-        with colB:
-            # Child-wise Timeline Scatter/Line Plot
-            fig_line = px.scatter(
-                emo_df, 
-                x="time_min", 
-                y="holistic_emotion", 
-                color="child_name",
-                title="Child-Wise Emotional Timeline",
-                labels={"time_min": "Time (Minutes)", "holistic_emotion": "Triangulated Emotion"}
-            )
-            # Add subtle connecting lines
-            fig_line.update_traces(mode='lines+markers', opacity=0.8)
-            st.plotly_chart(fig_line, use_container_width=True)
-        st.caption("💡 *Each dot is one child's emotion at one time bucket. Emotions come from the modality (face / voice / text) with the highest confidence — so a bored face during an enthusiastic answer weights the answer, not the face.*")
+    # 2. Per-Child Scorecard
+    st.subheader("👤 Per-Child Scorecard")
+    st.markdown("Every student's behavior derived from **face + voice + words**. Focus on **curiosity** and **questions asked** — the strongest markers of inquiry-based learning.")
+
+    child_df = metrics.get_child_stats(vid)
+    if child_df.empty:
+        st.info("No per-child data available.")
     else:
-        st.info("No emotion data available to triangulate.")
-        
-    st.markdown("---")
-    
-    # 3. Visual Attendance Tracking
-    st.subheader("Visual Engagement Tracking")
-    att_df = metrics.get_attendance_timeline(vid)
-    if not att_df.empty:
-        fig_att = px.line(
-            att_df, 
-            x="time_min", 
-            y=["attendance_count", "camera_on_count"],
-            title="Attendance & Cameras On Over Time",
-            labels={"time_min": "Time (Minutes)", "value": "Count", "variable": "Metric"}
+        names = child_df["name"].tolist()
+        selected = st.selectbox(
+            "Select a student",
+            options=names,
+            index=0,
+            help="Sorted by attendance %. First student is shown by default.",
         )
-        st.plotly_chart(fig_att, use_container_width=True)
-        st.caption("💡 *A gap between Attendance and Cameras-On usually means students are present but disengaged — worth flagging to the teacher.*")
-    else:
-        st.info("No visual attendance data available.")
-        
+        row = child_df[child_df["name"] == selected].iloc[0]
+
+        # Attendance color
+        att = row["attendance_pct"]
+        att_color = "#4ade80" if att >= 80 else "#fbbf24" if att >= 50 else "#f87171"
+
+        # Highlight if dominant emotion is Curious/positive
+        dom = row["dominant_emotion"]
+        is_curious = str(dom).strip().capitalize() in ("Curious", "Attentive", "Joyful", "Engaged", "Interested")
+        emo_bg = "#0a3a1a" if is_curious else "#2a2a2a"
+        emo_accent = "#6bff9e" if is_curious else "#dddddd"
+        emo_icon = "✨" if is_curious else "🎭"
+
+        # Distraction color
+        distr = row["distracted_pct"]
+        distr_color = "#f87171" if distr > 30 else "#fbbf24" if distr > 15 else "#dddddd"
+
+        card_html = (
+            f"<div style='background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px 24px;'>"
+            f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+            f"<div>"
+            f"<div style='font-size:1.5rem;font-weight:700;color:#fff;'>👤 {row['name']}</div>"
+            f"<div style='color:#8b949e;font-size:0.9rem;font-style:italic;margin-top:2px;'>{row['appearance']}</div>"
+            f"</div>"
+            f"<div style='background:{att_color};color:#0a0a0a;padding:8px 16px;border-radius:20px;font-weight:700;font-size:1.1rem;'>{att}% attendance</div>"
+            f"</div>"
+            f"<div style='background:{emo_bg};border-left:4px solid {emo_accent};padding:10px 14px;border-radius:6px;margin-top:16px;'>"
+            f"<span style='color:{emo_accent};font-weight:600;'>{emo_icon} Mostly {dom}</span>"
+            f"</div>"
+            f"</div>"
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
+
+        # HIGHLIGHTED metrics — Questions asked featured
+        st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+        h1, h2 = st.columns(2)
+        q_html = (
+            f"<div style='background:linear-gradient(135deg,#1e3a8a,#3b82f6);padding:20px;border-radius:12px;text-align:center;'>"
+            f"<div style='font-size:0.9rem;color:#dbeafe;text-transform:uppercase;letter-spacing:1px;'>❓ Questions Asked</div>"
+            f"<div style='font-size:3rem;font-weight:800;color:#fff;line-height:1.2;margin-top:6px;'>{row['questions_asked']}</div>"
+            f"<div style='color:#dbeafe;font-size:0.8rem;'>markers of curiosity</div>"
+            f"</div>"
+        )
+        h1.markdown(q_html, unsafe_allow_html=True)
+        s_html = (
+            f"<div style='background:linear-gradient(135deg,#065f46,#10b981);padding:20px;border-radius:12px;text-align:center;'>"
+            f"<div style='font-size:0.9rem;color:#d1fae5;text-transform:uppercase;letter-spacing:1px;'>💬 Spoke</div>"
+            f"<div style='font-size:3rem;font-weight:800;color:#fff;line-height:1.2;margin-top:6px;'>{row['spoke_times']}</div>"
+            f"<div style='color:#d1fae5;font-size:0.8rem;'>{int(row['speaking_sec'])}s total</div>"
+            f"</div>"
+        )
+        h2.markdown(s_html, unsafe_allow_html=True)
+
+        # Secondary metrics
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        s1, s2, s3 = st.columns(3)
+        s1.metric("✋ Hand raised", int(row["hand_raised"]))
+        s2.metric("👁 Distracted", f"{distr}%")
+        s3.metric("Teacher feedback", f"🟢 {int(row['praised'])}  ·  🔴 {int(row['shouted'])}")
+
+        st.caption("💡 *High questions + Curious dominant emotion = strong inquiry-based engagement.*")
+
     st.markdown("---")
-    
-    # 4. Teacher Behavior Log
-    st.subheader("Teacher Incident Log")
-    inc_df = metrics.get_teacher_incidents(vid)
-    if not inc_df.empty:
-        flag_style = {
-            "Shouting":     ("#3a0a0a", "#ff6b6b", "🔴"),
-            "Demotivating": ("#3a2a0a", "#ffb86b", "🟡"),
-            "Praising":     ("#0a3a1a", "#6bff9e", "🟢"),
-        }
-        for _, r in inc_df.iterrows():
-            flag = r["teacher_behavior_flag"]
-            bg, fg, icon = flag_style.get(flag, ("#2a2a2a", "#dddddd", "⚪"))
-            ts = f"{int(r['start_sec']//60):02d}:{int(r['start_sec']%60):02d}"
-            target = r["targeted_child"] if pd.notna(r["targeted_child"]) else "class"
-            st.markdown(
-                f"""
-                <div style='background:{bg};border-left:4px solid {fg};padding:12px 16px;border-radius:6px;margin-bottom:8px;'>
-                    <div style='color:{fg};font-weight:600;font-size:0.9rem;'>{icon} {flag} · <span style='color:#aaa;font-weight:400'>{ts} → {target}</span></div>
-                    <div style='color:#ddd;margin-top:6px;font-style:italic;'>“{r['utterance']}”</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+
+    # 2b. Engagement Heatmap
+    st.subheader("🔥 Engagement Heatmap")
+    st.markdown("Rows = students (sorted most engaged at the top). Columns = time. Green = engaged / curious. Red = bored / distracted. Hover for details.")
+
+    score_pivot, hover_pivot = metrics.get_engagement_heatmap(vid)
+    if score_pivot.empty:
+        st.info("Not enough visual data to build a heatmap.")
     else:
-        st.success("No negative teacher behaviors flagged in this session.")
-        
-    st.markdown("---")
-    
-    # 5. Chat-style Transcript
-    st.subheader("Full Class Transcript")
-    st.markdown("Every utterance mapped to its speaker (fuzzy-matched to the visible roster where possible) and text-based emotion.")
-    with st.expander(f"View full transcript", expanded=False):
-        trans_df = metrics.get_raw_transcript(vid)
-        if trans_df.empty:
-            st.info("No transcript rows available.")
-        else:
-            for _, r in trans_df.iterrows():
-                is_teacher = str(r["speaker_display"]).lower().startswith("teacher") or str(r["speaker_display"]).lower() == "teacher"
-                align = "flex-end" if is_teacher else "flex-start"
-                bubble_bg = "#264653" if is_teacher else "#2a3d2a"
-                accent = "#f4a261" if is_teacher else "#a8dadc"
-                q_marker = " ❓" if r["is_question"] else ""
-                emo = f" · <span style='color:#bbb'>{r['emotion_text']}</span>" if pd.notna(r["emotion_text"]) else ""
-                st.markdown(
-                    f"""
-                    <div style='display:flex;justify-content:{align};margin-bottom:8px;'>
-                        <div style='background:{bubble_bg};padding:10px 14px;border-radius:12px;max-width:75%;border-left:3px solid {accent};'>
-                            <div style='font-size:0.75rem;color:{accent};font-weight:600;'>
-                                {r['speaker_display']} · {r['time_range']}{q_marker}{emo}
-                            </div>
-                            <div style='color:#eee;margin-top:4px;'>{r['utterance']}</div>
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+        import plotly.graph_objects as go
+        fig_hm = go.Figure(data=go.Heatmap(
+            z=score_pivot.values,
+            x=list(score_pivot.columns),
+            y=list(score_pivot.index),
+            text=hover_pivot.values,
+            hovertemplate="%{text}<extra></extra>",
+            colorscale="RdYlGn",
+            zmin=0, zmax=1,
+            colorbar=dict(title="Engagement", tickvals=[0, 0.5, 1], ticktext=["Low", "Neutral", "High"]),
+        ))
+        fig_hm.update_layout(
+            xaxis=dict(title="Time (MM:SS)", side="bottom"),
+            yaxis=dict(title="", autorange="reversed"),
+            margin=dict(l=10, r=10, t=10, b=40),
+            height=max(280, 40 + 28 * len(score_pivot.index)),
+        )
+        st.plotly_chart(fig_hm, use_container_width=True)
+        st.caption("💡 *A vertical band of red across all students = something the teacher did lost the room. Isolated red rows = specific students needing check-in.*")
 
 # --- Footer ---
 st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align:center;color:#888;padding:20px 0;font-size:0.9rem;'>
-        Built by <strong>Surya Prakash</strong> · Data Analytics & AI<br>
-        <a href='https://github.com/psurya19997/Classroom-Analytics-App' style='color:#4da6ff;text-decoration:none;margin:0 8px;'>🐙 GitHub</a>
-        ·
-        <a href='https://www.linkedin.com/in/surya-prakash-a8464420b/' style='color:#4da6ff;text-decoration:none;margin:0 8px;'>💼 LinkedIn</a>
-        ·
-        <a href='mailto:suryap19997@gmail.com' style='color:#4da6ff;text-decoration:none;margin:0 8px;'>✉️ Email</a>
-        <br><br>
-        <span style='color:#666;font-size:0.8rem;'>Source: view the code on GitHub. Feedback welcome.</span>
-    </div>
-    """,
-    unsafe_allow_html=True,
+footer_html = (
+    "<div style='text-align:center;color:#888;padding:20px 0;font-size:0.9rem;'>"
+    "Built by <strong>Surya Prakash</strong> · Data Analytics & AI<br>"
+    "<a href='https://github.com/psurya19997/Classroom-Analytics-App' style='color:#4da6ff;text-decoration:none;margin:0 8px;'>🐙 GitHub</a>"
+    " · "
+    "<a href='https://www.linkedin.com/in/surya-prakash-a8464420b/' style='color:#4da6ff;text-decoration:none;margin:0 8px;'>💼 LinkedIn</a>"
+    " · "
+    "<a href='mailto:suryap19997@gmail.com' style='color:#4da6ff;text-decoration:none;margin:0 8px;'>✉️ Email</a>"
+    "<br><br>"
+    "<span style='color:#666;font-size:0.8rem;'>Source: view the code on GitHub. Feedback welcome.</span>"
+    "</div>"
 )
+st.markdown(footer_html, unsafe_allow_html=True)
