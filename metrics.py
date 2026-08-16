@@ -177,7 +177,7 @@ def _triangulate_per_bucket(video_id):
     conn = db.get_connection(video_id)
     v_df = pd.read_sql_query(
         """
-        SELECT r.child_id, r.name, c.timestamp_sec as bucket,
+        SELECT r.child_id, r.name, r.name_source, c.timestamp_sec as bucket,
                c.emotion_visual, c.confidence_visual,
                c.facial_expression, c.posture, c.hand_raised, c.distracted
         FROM child_frame_emotion c
@@ -188,7 +188,7 @@ def _triangulate_per_bucket(video_id):
     )
     a_df = pd.read_sql_query(
         f"""
-        SELECT r.child_id, r.name,
+        SELECT r.child_id, r.name, r.name_source,
                CAST(s.start_sec / {b_sec} AS INTEGER) * {b_sec} as bucket,
                s.emotion_audio, s.confidence_audio,
                s.emotion_text,  s.confidence_text
@@ -208,12 +208,12 @@ def _triangulate_per_bucket(video_id):
 
     if v_df.empty and a_df.empty:
         return pd.DataFrame(columns=[
-            "child_id", "name", "bucket", "best_emotion", "best_score",
+            "child_id", "name", "name_source", "bucket", "best_emotion", "best_score",
             "agreement_count", "modalities_present",
             "facial_expression", "posture", "hand_raised", "distracted",
         ])
 
-    merged = pd.merge(v_df, a_df, on=["child_id", "name", "bucket"], how="outer")
+    merged = pd.merge(v_df, a_df, on=["child_id", "name", "name_source", "bucket"], how="outer")
 
     def _pick(row):
         # Collect (emotion, confidence) pairs from whichever modalities are present
@@ -247,16 +247,20 @@ def _triangulate_per_bucket(video_id):
     picks = merged.apply(_pick, axis=1)
     out = pd.concat([merged, picks], axis=1)
     return out[[
-        "child_id", "name", "bucket", "best_emotion", "best_score",
+        "child_id", "name", "name_source", "bucket", "best_emotion", "best_score",
         "agreement_count", "modalities_present",
         "facial_expression", "posture", "hand_raised", "distracted",
     ]]
 
 
-def consensus_level(agreement_ratio):
+def consensus_level(agreement_ratio, name_source="visible", avg_modalities=3.0):
     """Map avg agreement ratio in [0,1] to a badge. 1.0 = all modalities agreed."""
     if agreement_ratio is None:
         return None
+    if name_source == "audio_unresolved":
+        return ("⚪", "Audio-only", "#6b7280")
+    if avg_modalities < 1.5:
+        return ("⚪", "Visual-only", "#6b7280")
     if agreement_ratio >= 0.85:
         return ("🟢", "High consensus", "#22c55e")
     if agreement_ratio >= 0.55:
@@ -272,7 +276,7 @@ def get_child_stats(video_id):
     total_frames = int(meta.iloc[0]["frames_analyzed"]) if not meta.empty and meta.iloc[0]["frames_analyzed"] else 1
 
     registry = pd.read_sql_query(
-        "SELECT child_id, name, appearance, role, total_frames_present, first_seen_sec FROM child_registry WHERE role = 'student'",
+        "SELECT child_id, name, name_source, appearance, role, total_frames_present, first_seen_sec FROM child_registry WHERE role = 'student'",
         conn,
     )
     if registry.empty:
@@ -300,19 +304,20 @@ def get_child_stats(video_id):
         addressed = scripts[scripts["targeted_child_id"] == cid]
         my_tri = tri[tri["child_id"] == cid] if not tri.empty else tri
 
-        attendance_pct = round(100.0 * (r["total_frames_present"] or 0) / total_frames, 1)
+        attendance_pct = round(min(100.0, 100.0 * (r["total_frames_present"] or 0) / total_frames), 1)
 
         # Dominant emotion via score-weighted vote across all buckets
         if not my_tri.empty and my_tri["best_emotion"].notna().any():
             valid = my_tri.dropna(subset=["best_emotion"])
             weighted = valid.groupby("best_emotion")["best_score"].sum().sort_values(ascending=False)
             dominant_emotion = weighted.index[0]
-            # Consensus for this student: average (agreement_count / modalities_present) across buckets
             ratios = valid["agreement_count"] / valid["modalities_present"].replace(0, 1)
             consensus_ratio = float(ratios.mean())
+            avg_modalities = float(valid["modalities_present"].mean())
         else:
             dominant_emotion = "—"
             consensus_ratio = None
+            avg_modalities = 3.0
 
         if not my_frames.empty:
             hand_raised_count = int(my_frames["hand_raised"].sum())
@@ -326,14 +331,19 @@ def get_child_stats(video_id):
         speaking_sec = float((my_utts["end_sec"] - my_utts["start_sec"]).sum()) if not my_utts.empty else 0.0
         praised = int(((addressed["teacher_behavior_flag"] == "Praising")).sum()) if not addressed.empty else 0
         shouted = int(((addressed["teacher_behavior_flag"] == "Shouting")).sum()) if not addressed.empty else 0
-
+        display_name = r["name"]
+        if r["name_source"] == "audio_unresolved" and display_name.startswith("Speaker_"):
+            display_name = f"🎙 Anonymous voice #{display_name.split('_')[-1]}"
+            
         rows.append({
             "child_id": cid,
-            "name": r["name"],
+            "name": display_name,
+            "name_source": r["name_source"],
             "appearance": r["appearance"] or "",
             "attendance_pct": attendance_pct,
             "dominant_emotion": dominant_emotion,
             "consensus_ratio": consensus_ratio,  # 0..1 avg modality agreement
+            "avg_modalities": avg_modalities,
             "questions_asked": questions_asked,
             "spoke_times": spoke_times,
             "hand_raised": hand_raised_count,
@@ -362,12 +372,15 @@ def _emotion_to_score(e):
     return ENGAGEMENT_SCORE.get(str(e).strip().capitalize(), 0.5)
 
 
-def get_engagement_heatmap(video_id):
+def get_engagement_heatmap(video_id, hide_anonymous=False):
     """Returns (matrix DataFrame [students × time_buckets], hover_text DataFrame same shape).
     Cells reflect the emotion picked by pure weighted-sum vote across face / voice / text."""
     tri = _triangulate_per_bucket(video_id)
     if tri.empty:
         return pd.DataFrame(), pd.DataFrame()
+
+    if hide_anonymous and "name_source" in tri.columns:
+        tri = tri[tri["name_source"] != "audio_unresolved"]
 
     tri = tri.dropna(subset=["best_emotion"]).copy()
     if tri.empty:
@@ -395,8 +408,15 @@ def get_engagement_heatmap(video_id):
 
     tri["hover"] = tri.apply(_hover, axis=1)
 
-    score_pivot = tri.pivot_table(index="name", columns="time_label", values="engagement", aggfunc="mean")
-    hover_pivot = tri.pivot_table(index="name", columns="time_label", values="hover", aggfunc="first")
+    def _fmt_name(row):
+        nm = row["name"]
+        if row.get("name_source") == "audio_unresolved" and nm.startswith("Speaker_"):
+            return f"🎙 Anonymous voice #{nm.split('_')[-1]}"
+        return nm
+    tri["display_name"] = tri.apply(_fmt_name, axis=1)
+
+    score_pivot = tri.pivot_table(index="display_name", columns="time_label", values="engagement", aggfunc="mean")
+    hover_pivot = tri.pivot_table(index="display_name", columns="time_label", values="hover", aggfunc="first")
 
     order = score_pivot.mean(axis=1).sort_values(ascending=False).index
     return score_pivot.loc[order], hover_pivot.loc[order]

@@ -323,9 +323,16 @@ if 'video_id' in st.session_state:
         )
         row = child_df[child_df["name"] == selected].iloc[0]
 
-        # Attendance color
-        att = row["attendance_pct"]
-        att_color = "#4ade80" if att >= 80 else "#fbbf24" if att >= 50 else "#f87171"
+        # Attendance badge
+        if row.get("name_source") == "audio_unresolved":
+            att_badge = "Could not match"
+            att_color = "#6b7280" # gray
+            att_title = "Audio-only participant whose identity could not be matched visually."
+        else:
+            att = row["attendance_pct"]
+            att_badge = f"{att}% on-camera"
+            att_color = "#4ade80" if att >= 80 else "#fbbf24" if att >= 50 else "#f87171"
+            att_title = "Percent of analyzed frames where this child was visible on camera."
 
         # Highlight if dominant emotion is Curious/positive
         dom = row["dominant_emotion"]
@@ -335,7 +342,7 @@ if 'video_id' in st.session_state:
         emo_icon = "✨" if is_curious else "🎭"
 
         # Consensus badge — how much face/voice/text agreed on the dominant emotion
-        cons = metrics.consensus_level(row.get("consensus_ratio"))
+        cons = metrics.consensus_level(row.get("consensus_ratio"), row.get("name_source"), row.get("avg_modalities", 3.0))
         if cons:
             cons_icon, cons_label, cons_color = cons
             consensus_html = (
@@ -357,7 +364,7 @@ if 'video_id' in st.session_state:
             f"<div style='font-size:1.5rem;font-weight:700;color:#fff;'>👤 {row['name']}</div>"
             f"<div style='color:#8b949e;font-size:0.9rem;font-style:italic;margin-top:2px;'>{row['appearance']}</div>"
             f"</div>"
-            f"<div style='background:{att_color};color:#0a0a0a;padding:8px 16px;border-radius:20px;font-weight:700;font-size:1.1rem;' title='Percent of analyzed frames where this child was visible on camera. Camera-off attendees are not counted.'>{att}% on-camera</div>"
+            f"<div style='background:{att_color};color:#0a0a0a;padding:8px 16px;border-radius:20px;font-weight:700;font-size:1.1rem;' title='{att_title}'>{att_badge}</div>"
             f"</div>"
             f"<div style='background:{emo_bg};border-left:4px solid {emo_accent};padding:10px 14px;border-radius:6px;margin-top:16px;'>"
             f"<span style='color:{emo_accent};font-weight:600;'>{emo_icon} Mostly {dom}</span>"
@@ -402,7 +409,9 @@ if 'video_id' in st.session_state:
     st.subheader("🔥 Engagement Heatmap")
     st.markdown("Rows = students (sorted most engaged at the top). Columns = time. Green = engaged / curious. Red = bored / distracted. Hover for details.")
 
-    score_pivot, hover_pivot = metrics.get_engagement_heatmap(vid)
+    hide_anonymous = st.checkbox("Hide anonymous voices", value=False)
+
+    score_pivot, hover_pivot = metrics.get_engagement_heatmap(vid, hide_anonymous)
     if score_pivot.empty:
         st.info("Not enough visual data to build a heatmap.")
     else:
